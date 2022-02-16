@@ -1,0 +1,298 @@
+---
+title: 'Gov 2018: Lab 4 Cross Validation'
+author:
+- 'Adeline Lo'
+date: 'Tuesday February 15, 2022'
+output:
+  pdf_document: default
+  html_document: default
+---
+This lab on Ridge Regression and the Lasso in R is based off of p. 251-255 of "Introduction to Statistical Learning with Applications in R" by Gareth James, Daniela Witten, Trevor Hastie and Robert Tibshirani. 
+
+# CV Ridge Regression and the Lasso
+
+```{r,warnings=FALSE}
+rm(list=ls())
+library(ISLR)
+library(glmnet)
+library(dplyr)
+library(tidyr)
+#set seed
+lab.seed<-202202
+```
+
+Use the `glmnet` package in order to perform ridge regression and the lasso. The main function in this package is `glmnet()`, which can be used to fit ridge regression models, lasso models, and more. 
+
+Load and remove `NA`s.
+
+
+```{r}
+Hitters = na.omit(Hitters)
+```
+
+Execute a ridge regression and the lasso in order to predict `Salary` on the `Hitters` data. 
+
+Set up data:
+
+
+```{r}
+x = model.matrix(Salary~., Hitters)[,-1] # trim off the first column
+                                         # leaving only the predictors
+y = Hitters$Salary
+```
+
+The `model.matrix()` function is particularly useful for creating $x$; not only does it produce a matrix corresponding to the 19 predictors but it also automatically transforms any qualitative variables into dummy variables.
+The latter property is important because `glmnet()` can only take numerical,
+quantitative inputs.
+
+## Question 1. Ridge Regression
+The `glmnet()` function has an alpha argument that determines what type
+of model is fit. If `alpha = 0` then a ridge regression model is fit, and if `alpha = 1`
+then a lasso model is fit. Fit a ridge regression model on `x` and `y` using the grid of lambda values from below.
+
+
+```{r}
+grid = 10^seq(10, -2, length = 100)
+# your.model.object <- glmnet(...)
+# x, y, alpha, lambda
+model <- glmnet(x, y, alpha = 0, lambda = grid)
+
+print(model)
+
+
+```
+
+By default the `glmnet()` function performs ridge regression for an automatically
+selected range of $\lambda$ values. However, here we have chosen to implement
+the function over a grid of values ranging from $\lambda = 10^{10}$ to $\lambda = 10^{-2}$, essentially covering the full range of scenarios from the null model containing only the intercept, to the least squares fit. 
+
+As we will see, we can also compute model fits for a particular value of $\lambda$ that is not one of the original
+grid values. Note that by default, the `glmnet()` function standardizes the variables so that they are on the same scale. To turn off this default setting, use the argument `standardize = FALSE`.
+
+Associated with each value of $\lambda$ is a vector of ridge regression coefficients, stored in a matrix that can be accessed by `coef()`. In this case, it is a $20 \times 100$ matrix, with 20 rows (one for each predictor, plus an intercept) and 100
+columns (one for each value of $\lambda$). Plot your coefficients from the ridge regression output with `plot(your.model.object)`.
+
+```{r}
+
+# dim(coef(your.model.object))
+# plot(your.model.object)
+
+dim(coef(model))
+plot(model, label = TRUE)
+
+```
+
+We expect the coefficient estimates to be much smaller, in terms of $l_2$ norm, when a large value of $\lambda$ is used, as compared to when a small value of $\lambda$ is used. Set $\lambda$ to its 50th value. What are the coefficients at this value?
+What's their $l_2$ norm (remove the intercept value)?
+
+
+```{r}
+# Hint: use coef()
+
+# 50th lambda
+model$lambda[50]
+
+# coefficients for 50th lambdas
+coef(model, s = grid[50])
+
+# create a vector so I can make l2
+vector <- coef(model, s = grid[50])[-1]
+sqrt(sum(vector^2))
+
+```
+
+In contrast, what are the coefficients when $\lambda$ is at its 60th value? Their $l_2$
+norm? Note the much larger $l_2$ norm of the coefficients associated with this
+smaller value of $\lambda$.
+
+
+```{r}
+
+# 60th lambda
+model$lambda[60]
+
+# coefficients for 60th lambdas
+coef(model, s = grid[60])
+
+# create a vector so I can make l2
+vector2 <- coef(model, s = grid[60])[-1]
+sqrt(sum(vector2^2))
+
+```
+
+
+Split the samples into a 80% training set and a 20% test set in order
+to estimate the test error of ridge regression and the lasso.
+
+
+```{r}
+set.seed(lab.seed)
+
+# randomly sample so I can slice data
+data <- sample_frac(Hitters, 1L)
+
+# create train and test data
+train <- slice(data, 1:210)
+test <- slice(data, 211:263)
+
+# create x and y values for training and test data
+x_train = model.matrix(Salary~., train)[,-1]
+x_test = model.matrix(Salary~., test)[,-1]
+y_train = train$Salary
+y_test = test$Salary
+
+```
+
+Next fit a ridge regression model on the training set, and evaluate
+its MSE (mean squared error) on the test set, using $\lambda = 40$. Note the use of the `predict()`
+function again: get predictions for a test set making sure to use`newx` argument.
+
+
+```{r}
+set.seed(lab.seed)
+
+# new model
+ridge2 <- glmnet(x_train, y_train, alpha = 0, lambda = grid, thresh = 1e-12)
+
+# create prediction
+pred <- predict(ridge2, s = 40, newx = x_test)
+
+# calculate mse
+mse1 <- mean((pred - y_test)^2)
+mse1
+```
+The test MSE is `r mse1`.
+
+
+Instead of arbitrarily choosing $\lambda = 40$, it would be better to
+use cross-validation to choose the tuning parameter $\lambda$. We can do this using
+the built-in cross-validation function, `cv.glmnet()`. By default, the function
+performs 10-fold cross-validation, though this can be changed using the
+argument `nfolds`. Set folds to 10 and calculate the $\lambda$ that best minimizes the training MSE (`lambda.min` item in object returned from `cv.glmnet()`).
+
+
+```{r}
+set.seed(lab.seed)
+
+# Fit ridge regression model on training data
+cross_mod = cv.glmnet(x_train, y_train, alpha = 0, nfolds=10) 
+
+# find the best lambda value
+bestlam = cross_mod$lambda.min
+bestlam
+
+```
+
+
+Plot the MSE as a function of $\lambda$ by using `plot()` on our returned object from our call to `cv.glmnet`.
+
+```{r}
+
+plot(cross_mod)
+
+```
+
+What is the test MSE associated with this value of $\lambda$ ($\lambda$ that best minimizes the training MSE)?
+
+```{r}
+# do the same thing as before the calculate mse
+# create prediction
+pred2 <- predict(cross_mod, s = bestlam, newx = x_test)
+
+# calculate mse
+mse2 <- mean((pred2 - y_test)^2)
+mse2
+
+```
+The second MSE is smaller, meaning that this lambda value is better.
+
+Refit the ridge regression model on the full data set, using the value of $\lambda$ chosen by cross-validation, and examine the coefficient
+estimates.
+
+```{r}
+# use all of the data
+out = glmnet(x, y, alpha = 0)
+
+# create predictions with full data and chosen lambda value
+predict(out, type = "coefficients", s = bestlam)[1:20,]
+```
+All of the values are very close to zero.
+
+
+## Question 2. The Lasso
+
+You just executed ridge regression with a wise choice of $\lambda$. Can lasso yield either a more accurate or a more interpretable model than ridge regression? Fit a lasso model, however, this time use the argument `alpha=1`.
+Other than that change, proceed just as you did in fitting a ridge model. Plot your model object coefficients.
+
+```{r}
+set.seed(lab.seed)
+
+# create a lasso model with training data
+lasso_mod = glmnet(x_train, y_train, alpha = 1, lambda = grid)
+
+plot(lasso_mod) 
+
+```
+
+Now run the model again, this time performing cross-validation with folds equal to 10.
+Plot the model object. Then using the lambda that minimizes your cross validated training MSE, compute the associated testing MSE:
+
+
+```{r}
+set.seed(lab.seed)
+
+# fit model with cross validation on training data - the same as was done in earlier question
+cv.out = cv.glmnet(x_train, y_train, alpha = 1, nfolds = 10)
+# plot model
+plot(cv.out)
+
+# find the best lambda - minimze MSE
+bestlam = cv.out$lambda.min
+
+# predict
+lasso_pred = predict(lasso_mod, s = bestlam, newx = x_test)
+
+# calculate mse value
+mse3 <-mean((lasso_pred - y_test)^2)
+mse3
+
+```
+
+
+## Question 3. K-fold cross validation
+
+Conduct K-fold cross validation for the ridge and lasso, with $k\in\{5,7,9,11,13,15\}$. Assess the models at each $k$ value by calculating the risk/prediction error in the test set and suggest the best $k$ for each. Suggest the best final model.
+
+```{r}
+set.seed(lab.seed)
+
+# create k-values
+K<-c(5,7,9,11,13,15)
+
+# create a blank data frame
+mse <- data.frame(ridge=rep(NA,length(K)),lasso=rep(NA,length(K)))
+
+# create a for loop to run the different k-values 
+# use the same models as before
+
+for(k in 1:length(K)){
+  
+  cv.lasso = cv.glmnet(x_train, y_train, alpha = 1, nfolds = K[k])
+  cv.ridge = cv.glmnet(x_train, y_train, alpha = 0, nfolds = K[k])
+  lasso_pred = predict(lasso_mod, s = cv.lasso$lambda.min, newx = x_test)
+  ridge_pred = predict(model, s = cv.ridge$lambda.min, newx = x_test) # Use best lambda to predict test data
+  mse$ridge[k]<-mean((pred - y_test)^2) # Calculate test MSE
+  mse$lasso[k]<-mean((pred2 - y_test)^2)
+  cat("For k=",K[k],", MSE for ridge is = ", mse$ridge[k],"\n")
+  cat("For k=",K[k],", MSE for lasso is = ", mse$lasso[k],"\n")
+}
+
+cat("Best ridge k is: ",K[which(mse$ridge==min(mse$ridge))],"\n")
+
+cat("Best lasso k is: ",K[which(mse$lasso==min(mse$lasso))],"\n")
+
+min(mse)
+
+```
+
+Interestingly, it seems that all of the k values are the best for both ridge and lasso. I don't think this is correct.
